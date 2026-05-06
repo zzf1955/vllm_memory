@@ -14,6 +14,7 @@ from vllm.distributed.kv_transfer.kv_connector.v1.base import (
     KVConnectorRole,
 )
 from vllm.logger import init_logger
+from vllm.utils import length_from_prompt_token_ids_or_embeds
 from vllm.v1.attention.backend import AttentionMetadata
 from vllm.v1.core.sched.output import NewRequestData, SchedulerOutput
 
@@ -23,6 +24,18 @@ if TYPE_CHECKING:
     from vllm.v1.request import Request
 
 logger = init_logger(__name__)
+
+
+def token_ids_from_request_data(request_data: NewRequestData) -> list[int]:
+    """Return real token IDs, or prompt-embed placeholders when IDs are absent."""
+    if request_data.prompt_token_ids is not None:
+        return request_data.prompt_token_ids
+
+    prompt_len = length_from_prompt_token_ids_or_embeds(
+        request_data.prompt_token_ids,
+        request_data.prompt_embeds,
+    )
+    return [0] * prompt_len
 
 
 def extract_from_kv_cache(
@@ -263,7 +276,7 @@ class ExampleHiddenStatesConnector(KVConnectorBase_V1):
         """
         meta = ExampleHiddenStatesConnectorMetadata()
         for new_req in scheduler_output.scheduled_new_reqs:
-            token_ids = new_req.prompt_token_ids or []
+            token_ids = token_ids_from_request_data(new_req)
             filename = os.path.join(self._storage_path, f"{new_req.req_id}.safetensors")
             meta.add_request(
                 new_req.req_id,
@@ -297,7 +310,7 @@ class ExampleHiddenStatesConnector(KVConnectorBase_V1):
             meta.add_request(
                 req_id=req_id,
                 filename=filename,
-                token_ids=cached_req.prompt_token_ids or [],
+                token_ids=token_ids_from_request_data(cached_req),
                 block_ids=req_block_ids,
                 block_size=self._block_size,
                 new_req=False,
