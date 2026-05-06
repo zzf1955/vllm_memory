@@ -217,6 +217,7 @@ async def run_async_prompt_embeds(
         max_model_len=args.max_model_len,
         gpu_memory_utilization=args.gpu_memory_utilization,
         enforce_eager=args.enforce_eager,
+        enable_prefix_caching=False,
         enable_prompt_embeds=True,
         speculative_config=build_speculative_config(layer_ids),
         kv_transfer_config=build_kv_transfer_config(storage_path),
@@ -261,6 +262,7 @@ def run_llm_token_prompt(
         max_model_len=args.max_model_len,
         gpu_memory_utilization=args.gpu_memory_utilization,
         enforce_eager=args.enforce_eager,
+        enable_prefix_caching=False,
         speculative_config=build_speculative_config(layer_ids),
         kv_transfer_config=build_kv_transfer_config(storage_path),
     )

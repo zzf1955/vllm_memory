@@ -18,24 +18,20 @@ PYTHON="python"
 GPU="1"
 MODEL="Qwen/Qwen3-0.6B"
 SEQ_LEN="16"
-MEM_LEN="8"
-BATCH_SIZE="8"
-NUM_ROUNDS="20"
-GPU_MEMORY_UTILIZATION="0.2"
+BATCH_SIZE="4"
+NUM_ROUNDS="10"
+GPU_MEMORY_UTILIZATION="0.7"
 MAX_MODEL_LEN="512"
-LAYER_IDS="1"
+LAYER_IDS="all"
 DTYPE="bfloat16"
 
 RUN_ROOT="/disk_n/zzf/tmp/vllm_prompt_embed_hidden_states_demo"
-GT_PREFIX="${RUN_ROOT}/qwen3_gt"
+SINGLE_ROOT="${RUN_ROOT}/single"
+BATCH_ROOT="${RUN_ROOT}/batch_b${BATCH_SIZE}_r${NUM_ROUNDS}"
 LOG_DIR="${RUN_ROOT}/logs"
-SINGLE_WORK_DIR="${RUN_ROOT}/single"
-CONCURRENT_WORK_DIR="${RUN_ROOT}/concurrent_b${BATCH_SIZE}_r${NUM_ROUNDS}"
-MEM_WORK_DIR="${RUN_ROOT}/memory_b${BATCH_SIZE}_r${NUM_ROUNDS}"
 LOG_FILE="${LOG_DIR}/demo_$(date +%Y%m%d_%H%M%S).log"
 
-mkdir -p "${RUN_ROOT}" "${LOG_DIR}" "${SINGLE_WORK_DIR}" \
-  "${CONCURRENT_WORK_DIR}" "${MEM_WORK_DIR}"
+mkdir -p "${SINGLE_ROOT}" "${BATCH_ROOT}" "${LOG_DIR}"
 
 run_step() {
   local name="$1"
@@ -62,80 +58,49 @@ main() {
   echo "GPU: ${GPU}"
   echo "Model: ${MODEL}"
   echo "SEQ_LEN: ${SEQ_LEN}"
-  echo "MEM_LEN: ${MEM_LEN}"
+  echo "LAYER_IDS: ${LAYER_IDS}"
   echo "BATCH_SIZE: ${BATCH_SIZE}"
   echo "NUM_ROUNDS: ${NUM_ROUNDS}"
-  echo "LAYER_IDS: ${LAYER_IDS}"
   echo "GPU_MEMORY_UTILIZATION: ${GPU_MEMORY_UTILIZATION}"
   echo "MAX_MODEL_LEN: ${MAX_MODEL_LEN}"
-  echo
 
   run_step "GPU status before run" \
     nvidia-smi --query-gpu=index,memory.used,memory.free --format=csv,noheader,nounits
 
-  run_step "Generate Hugging Face ground truth" \
-    env CUDA_VISIBLE_DEVICES="${GPU}" "${PYTHON}" \
-      examples/offline_inference/save_prompt_embed_hidden_states_ground_truth.py \
+  run_step "Single sample: generate GT and run vLLM single test" \
+    "${PYTHON}" examples/offline_inference/prompt_embed_single_demo.py \
       --model "${MODEL}" \
+      --run-root "${SINGLE_ROOT}" \
+      --gpu "${GPU}" \
       --seq-len "${SEQ_LEN}" \
-      --device cuda \
+      --layer-ids "${LAYER_IDS}" \
       --dtype "${DTYPE}" \
-      --output "${GT_PREFIX}.pth"
-
-  run_step "Single prompt-embeds vs LLM.generate baseline" \
-    env CUDA_VISIBLE_DEVICES="${GPU}" "${PYTHON}" \
-      examples/offline_inference/prompt_embed_extract_hidden_states.py \
-      --model "${MODEL}" \
-      --input-pth "${GT_PREFIX}.input.pth" \
-      --output-pth "${GT_PREFIX}.output.pth" \
-      --work-dir "${SINGLE_WORK_DIR}" \
-      --layer-ids "${LAYER_IDS}" \
       --max-model-len "${MAX_MODEL_LEN}" \
-      --gpu-memory-utilization "${GPU_MEMORY_UTILIZATION}" \
-      --dtype "${DTYPE}"
+      --gpu-memory-utilization "${GPU_MEMORY_UTILIZATION}"
 
-  run_step "Concurrent prompt-embeds stress test" \
-    env CUDA_VISIBLE_DEVICES="${GPU}" "${PYTHON}" \
-      examples/offline_inference/prompt_embed_extract_hidden_states_concurrent.py \
+  run_step "Batch sample: generate single/batch GT and run vLLM batch test" \
+    "${PYTHON}" examples/offline_inference/prompt_embed_batch_demo.py \
       --model "${MODEL}" \
-      --input-pth "${GT_PREFIX}.input.pth" \
-      --output-pth "${GT_PREFIX}.output.pth" \
-      --work-dir "${CONCURRENT_WORK_DIR}" \
+      --input-pth "${SINGLE_ROOT}/single_gt.input.pth" \
+      --run-root "${BATCH_ROOT}" \
+      --gpu "${GPU}" \
       --layer-ids "${LAYER_IDS}" \
       --batch-size "${BATCH_SIZE}" \
       --num-rounds "${NUM_ROUNDS}" \
+      --dtype "${DTYPE}" \
       --max-model-len "${MAX_MODEL_LEN}" \
-      --gpu-memory-utilization "${GPU_MEMORY_UTILIZATION}" \
-      --dtype "${DTYPE}"
-
-  run_step "MEM prompt-embeds stress test" \
-    env CUDA_VISIBLE_DEVICES="${GPU}" "${PYTHON}" \
-      examples/offline_inference/prompt_embed_memory_extract_hidden_states_concurrent.py \
-      --model "${MODEL}" \
-      --input-pth "${GT_PREFIX}.input.pth" \
-      --work-dir "${MEM_WORK_DIR}" \
-      --layer-ids "${LAYER_IDS}" \
-      --mem-len "${MEM_LEN}" \
-      --batch-size "${BATCH_SIZE}" \
-      --num-rounds "${NUM_ROUNDS}" \
-      --max-model-len "${MAX_MODEL_LEN}" \
-      --gpu-memory-utilization "${GPU_MEMORY_UTILIZATION}" \
-      --dtype "${DTYPE}"
+      --gpu-memory-utilization "${GPU_MEMORY_UTILIZATION}"
 
   echo
   echo "===== Output files ====="
-  echo "Ground truth prompt: ${GT_PREFIX}.prompt.txt"
-  echo "Ground truth input:  ${GT_PREFIX}.input.pth"
-  echo "Ground truth output: ${GT_PREFIX}.output.pth"
-  echo "Single work dir:     ${SINGLE_WORK_DIR}"
-  echo "Concurrent work dir: ${CONCURRENT_WORK_DIR}"
-  echo "MEM work dir:        ${MEM_WORK_DIR}"
-  echo "Log file:            ${LOG_FILE}"
+  echo "Single root: ${SINGLE_ROOT}"
+  echo "Batch root:  ${BATCH_ROOT}"
+  echo "Log file:    ${LOG_FILE}"
 
   echo
   echo "===== Key summary lines ====="
   grep -E \
-    "Generated ids match|Stress test summary|Memory stress test summary|total_requests|failed_compares|prefix_max_abs|memory_max_abs|max_abs|mean_abs_avg|expected_shape|generated_ids|baseline_generated_ids|Prompt-embeds vs HF hidden states" \
+    "SINGLE_DEMO_RESULT|BATCH_DEMO_RESULT|single_generated_ids_match|single_prompt_embeds_vs_token_hidden_states|single_vs_batch_summary|async_vs_batch_summary|async_vs_single_summary|status=FAIL|max_abs|mean_abs|Prompt-embeds vs token hidden states|Generated ids match" \
     "${LOG_FILE}" || true
 }
 

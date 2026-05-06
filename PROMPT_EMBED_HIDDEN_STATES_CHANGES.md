@@ -223,14 +223,24 @@ kv_transfer_config={
 }
 ```
 
-6. 从 connector 保存的 safetensors 里读取：
+6. demo 里的 prompt-embeds / hidden-states engine 还显式设置：
+
+```python
+enable_prefix_caching=False
+```
+
+这避免同一段 `prompt` 文本但不同 `prompt_embeds` 的请求被 token/text prefix cache
+错误地视为同一前缀。当前 demo 更关注 prompt embeddings 本身的等价性和 connector
+导出结果，因此关闭 prefix cache 更稳妥。
+
+7. 从 connector 保存的 safetensors 里读取：
 
 ```text
 hidden_states
 token_ids
 ```
 
-7. 比较：
+8. 比较：
 
 - `LLM.generate` token prompt 生成 token id。
 - `AsyncLLM.generate` prompt embeds 生成 token id。
@@ -299,6 +309,39 @@ Prompt-embeds vs HF hidden states: {'allclose': True, 'max_abs': 0.00390625, 'me
 /disk_n/zzf/tmp/qwen3_extract_demo/llm-token-prompt/0-b6e0ae2f.safetensors
 /disk_n/zzf/tmp/qwen3_extract_demo/async-prompt-embeds/prompt-embeds-extract-hidden-states-9e33196b.safetensors
 ```
+
+#### 已跑通命令：全 28 层
+
+GPU 1 当时仍被其他进程占用，本次全层验证改用空闲的 GPU 0：
+
+```bash
+CUDA_VISIBLE_DEVICES=0 \
+/disk_n/zzf/conda_envs/vllm_memory/bin/python \
+  examples/offline_inference/prompt_embed_extract_hidden_states.py \
+  --input-pth /disk_n/zzf/tmp/qwen3_gt_gpu.input.pth \
+  --output-pth /disk_n/zzf/tmp/qwen3_gt_gpu.output.pth \
+  --work-dir /disk_n/zzf/tmp/qwen3_extract_demo_all_layers_single \
+  --layer-ids all \
+  --max-model-len 512 \
+  --gpu-memory-utilization 0.7
+```
+
+关键结果：
+
+```text
+Layer ids: [1, 2, ..., 28]
+LLM token generated ids: [279]
+Async prompt-embeds generated ids: [279]
+Generated ids match: True
+LLM token hidden shape: (16, 28, 1024)
+Prompt-embeds hidden shape: (16, 28, 1024)
+Prompt-embeds vs token hidden states: {'allclose': True, 'max_abs': 0.0, 'mean_abs': 0.0, 'shape': (16, 28, 1024)}
+```
+
+和 HF 原生 `hidden_states` 的逐层对比中，1 到 27 层是逐层累积的数值差异；第 28 层差异很大，
+更像是 vLLM `extract_hidden_states` 抽取位置和 HF `hidden_states[-1]` 是否包含 final norm
+的语义差异。这个差异不影响本 demo 的核心判断：vLLM token prompt 和 vLLM prompt embeds
+在同一抽取路径下全层完全一致。
 
 ### `examples/offline_inference/prompt_embed_extract_hidden_states_concurrent.py`
 
@@ -403,8 +446,117 @@ Stress test summary:
   prompt-embeds 请求没有复现 zero-length hidden states、文件缺失或请求串线问题。
 - batch=4 连续 10 轮，总 40 个并发请求通过。
 - batch=8 连续 20 轮，总 160 个并发请求通过。
-- 当前测试使用 eager 模式和单层 hidden state，是为了避免 GPU 1 当前显存被其他进程占用
-  时产生 OOM 干扰。全层 hidden states 并发还没有在空闲 GPU 上验证。
+- 全 28 层并发也做了 b=4/r=10 的定位测试；请求没有崩溃、shape 和生成 token 正常，但
+  这个脚本使用“单条 sequential reference”作为 strict reference，和 batch 并发路径的
+  deep raw hidden states 存在 FlashAttention/batching 数值差，结果为 `failed_compares=30/40`、
+  `max_abs=32.0`。同一批中的非首个请求彼此完全一致，未观察到请求串线。
+- 对全层场景，更可靠的验证是 MEM 脚本里的 batch `LLM.generate` baseline vs batch
+  `AsyncLLM.generate`，见下一节。
+- 已新增 `--mode gt-only|async-only` 用于把 GT 生成和 AsyncLLM 并发验证拆到不同 Python
+  进程里，避免同一进程连续创建多个 vLLM engine 后 AsyncLLM 初始化不稳定。
+- 已新增两种 GT：
+  - `llm-single-ground-truth`：逐条单独 `LLM.generate`。
+  - `llm-batch-ground-truth`：同一批请求一次性 `LLM.generate`。
+- 全 28 层、batch=4 时，batch GT 和 single GT 本身不同：
+
+```text
+Batch GT vs single GT:
+  failed_compares: 3 / 4
+  max_abs: 32.0
+```
+
+- 使用独立 Async-only 进程跑全 28 层、batch=4、rounds=10 后，Async batch 和 batch GT
+  完全一致；Async batch 和 single GT 仍然失败：
+
+```text
+total_requests: 40
+batch_gt_failed_compares: 0
+batch_gt_max_abs: 0.0
+batch_gt_mean_abs_avg: 0.0
+single_gt_failed_compares: 30
+single_gt_max_abs: 32.0
+single_gt_mean_abs_avg: 0.03352775704115629
+```
+
+- 全 28 层、batch=8 时，batch GT 和 single GT 差异更大：
+
+```text
+Batch GT vs single GT:
+  failed_compares: 7 / 8
+  max_abs: 64.0
+```
+
+- 使用独立 Async-only 进程跑全 28 层、batch=8、rounds=20 后，160 个请求中有 2 个请求
+  相比 batch GT 失败，均发生在 round 13 的 b0/b1：
+
+```text
+total_requests: 160
+batch_gt_failed_compares: 2
+batch_gt_max_abs: 96.0
+batch_gt_mean_abs_avg: 0.0005505115259438753
+single_gt_failed_compares: 141
+single_gt_max_abs: 96.0
+single_gt_mean_abs_avg: 0.03954133654478938
+```
+
+定位结果：
+
+```text
+round 13 b0: vs batch GT max_abs=96.0
+round 13 b1: vs batch GT max_abs=32.0
+```
+
+这两个异常输出不等于 batch=2 GT，也不是简单的 batch index 互换。当前判断：
+
+- “batch 输出 vs single GT”失败是确定的 reference mismatch。
+- “Async batch vs batch GT”在 batch=4 下稳定通过。
+- “Async batch vs batch GT”在 batch=8/r=20 下仍存在少量异常，需要继续修 connector
+  或调度/保存路径，重点看 round 内部分请求是否发生了 prefill 分组、cached request 分支或
+  connector metadata/slot mapping 状态错误。
+
+### `examples/offline_inference/prompt_embed_async_batch_only.py`
+
+这是新增的纯 AsyncLLM batch 输出脚本。
+
+#### 功能
+
+只启动 `AsyncLLM`，不 import/use `LLM`，输入一组 prompt embeddings batch，连续跑多轮，
+并通过 `ExampleHiddenStatesConnector` 保存每个请求的 hidden states safetensors。
+
+用途是把 Async batch 验证和 GT 生成拆到两个独立 Python 进程里，避免同一进程连续创建
+`LLM` 和 `AsyncLLM` engine 带来的初始化干扰。
+
+#### 已跑命令
+
+batch=4/r=10：
+
+```bash
+CUDA_VISIBLE_DEVICES=3 \
+/disk_n/zzf/conda_envs/vllm_memory/bin/python \
+  examples/offline_inference/prompt_embed_async_batch_only.py \
+  --input-pth /disk_n/zzf/tmp/qwen3_gt_gpu.input.pth \
+  --work-dir /disk_n/zzf/tmp/qwen3_concurrent_batch_vs_single_gt_all_layers_b4_r1 \
+  --layer-ids all \
+  --batch-size 4 \
+  --num-rounds 10 \
+  --max-model-len 512 \
+  --gpu-memory-utilization 0.7
+```
+
+batch=8/r=20：
+
+```bash
+CUDA_VISIBLE_DEVICES=3 \
+/disk_n/zzf/conda_envs/vllm_memory/bin/python \
+  examples/offline_inference/prompt_embed_async_batch_only.py \
+  --input-pth /disk_n/zzf/tmp/qwen3_gt_gpu.input.pth \
+  --work-dir /disk_n/zzf/tmp/qwen3_concurrent_batch_vs_single_gt_all_layers_b8_gt \
+  --layer-ids all \
+  --batch-size 8 \
+  --num-rounds 20 \
+  --max-model-len 512 \
+  --gpu-memory-utilization 0.7
+```
 
 ### `examples/offline_inference/prompt_embed_memory_extract_hidden_states_concurrent.py`
 
@@ -536,6 +688,58 @@ Memory stress test summary:
 - batch=8 连续 20 轮，总 160 个并发请求通过。
 - prefix region 和 memory region 分别和 `LLM.generate` baseline 对比，均
   `failed_compares=0`。
+
+#### 已跑通命令 3：MEM 全 28 层，batch=4，10 轮
+
+```bash
+CUDA_VISIBLE_DEVICES=0 \
+/disk_n/zzf/conda_envs/vllm_memory/bin/python \
+  examples/offline_inference/prompt_embed_memory_extract_hidden_states_concurrent.py \
+  --input-pth /disk_n/zzf/tmp/qwen3_gt_gpu.input.pth \
+  --work-dir /disk_n/zzf/tmp/qwen3_memory_concurrent_demo_all_layers_b4_noprefix \
+  --layer-ids all \
+  --batch-size 4 \
+  --num-rounds 10 \
+  --max-model-len 512 \
+  --gpu-memory-utilization 0.7
+```
+
+关键结果：
+
+```text
+total_requests: 40
+failed_compares: 0
+prefix_max_abs: 0.0
+memory_max_abs: 0.0
+expected_shape: (32, 28, 1024)
+baseline_generated_ids: [[320], [320], [320], [320]]
+```
+
+#### 已跑通命令 4：MEM 全 28 层，batch=8，20 轮
+
+```bash
+CUDA_VISIBLE_DEVICES=0 \
+/disk_n/zzf/conda_envs/vllm_memory/bin/python \
+  examples/offline_inference/prompt_embed_memory_extract_hidden_states_concurrent.py \
+  --input-pth /disk_n/zzf/tmp/qwen3_gt_gpu.input.pth \
+  --work-dir /disk_n/zzf/tmp/qwen3_memory_concurrent_demo_all_layers_b8_noprefix \
+  --layer-ids all \
+  --batch-size 8 \
+  --num-rounds 20 \
+  --max-model-len 512 \
+  --gpu-memory-utilization 0.7
+```
+
+关键结果：
+
+```text
+total_requests: 160
+failed_compares: 0
+prefix_max_abs: 0.0
+memory_max_abs: 0.0
+expected_shape: (32, 28, 1024)
+baseline_generated_ids: [[320], [320], [320], [320], [320], [320], [320], [320]]
+```
 
 ### `demo.sh`
 
@@ -689,22 +893,24 @@ CUDA_VISIBLE_DEVICES=1 \
 
 - 纯 `prompt_embeds` 请求没有真实 token ids，因此 connector 保存的 `token_ids` 是占位
   0。hidden states 的长度和内容是有效的。
-- 当前只在单样例、单层 hidden state 上完成验证。
-- 当前已额外完成 batch=4/8 的单层并发压测。
-- 当前已额外完成 `<MEM(8)> <prompt_emb(16)> <MEM(8)>` 的 batch=4/8 单层并发压测。
-- 在 GPU 1 上尝试 `--layer-ids all` 时，因为已有其他进程占用约 18 GiB 显存，vLLM
-  warmup 末尾触发 OOM。不是模型本身无法加载，而是当前 GPU 剩余显存不足。
-- 全层 hidden states 并发还没有在空闲 GPU 上验证。
+- demo 脚本显式关闭 prefix cache：`enable_prefix_caching=False`。如果后续要在真实业务里打开
+  prefix cache，需要确认 cache key 能区分 prompt embeddings，而不只是 token/text。
+- 已完成单样例全 28 层验证：vLLM token prompt vs vLLM prompt embeds 完全一致。
+- 已完成 batch=4/8 的单层并发压测。
+- 已完成 `<MEM(8)> <prompt_emb(16)> <MEM(8)>` 的 batch=4/8 单层和全 28 层并发压测。
+- 普通并发脚本的 all-layer strict sequential-reference 对比会失败，原因是单条执行和 batch
+  执行的 deep raw hidden states 有数值差；MEM 脚本使用 batch baseline，可以更准确验证
+  all-layer 并发路径。
+- 在 GPU 1 上早先尝试 `--layer-ids all` 时，因为已有其他进程占用约 18 GiB 显存，vLLM
+  warmup 末尾触发 OOM。当前全层测试已在 GPU 0 上通过。
 
 ## 当前 git 状态相关文件
 
 ```text
  M vllm/distributed/kv_transfer/kv_connector/v1/example_hidden_states_connector.py
+ M examples/offline_inference/prompt_embed_extract_hidden_states.py
+ M examples/offline_inference/prompt_embed_extract_hidden_states_concurrent.py
+ M examples/offline_inference/prompt_embed_memory_extract_hidden_states_concurrent.py
+ M PROMPT_EMBED_HIDDEN_STATES_CHANGES.md
 ?? LOCAL_ENVIRONMENT.md
-?? PROMPT_EMBED_HIDDEN_STATES_CHANGES.md
-?? demo.sh
-?? examples/offline_inference/prompt_embed_memory_extract_hidden_states_concurrent.py
-?? examples/offline_inference/prompt_embed_extract_hidden_states.py
-?? examples/offline_inference/prompt_embed_extract_hidden_states_concurrent.py
-?? examples/offline_inference/save_prompt_embed_hidden_states_ground_truth.py
 ```
