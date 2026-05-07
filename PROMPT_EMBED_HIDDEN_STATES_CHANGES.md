@@ -1,17 +1,5 @@
 # Prompt Embeds + Extract Hidden States Change Log
 
-## 背景
-
-目标是在 vLLM 0.18.1 或更新版本上，用 `prompt_embeds` 作为输入，并通过
-`extract_hidden_states` 导出 prompt token 对应的 hidden states。当前验证重点是：
-
-- 最小修改，优先只改 KV connector。
-- 跑通单样例。
-- prompt-embeds 路径和普通 `LLM.generate` token prompt 路径对比一致。
-- 可选和 Hugging Face 原生 forward 保存的 ground truth 对比。
-
-参考：
-
 - `https://vllm-project.github.io/2026/03/30/extract-hidden-states.html`
 - `https://github.com/vllm-project/vllm/blob/main/examples/features/prompt_embed/prompt_embed_inference_with_openai_client.py`
 
@@ -91,7 +79,7 @@ token_ids=token_ids_from_request_data(cached_req)
 当前占位 token ids 只用于让 connector 知道保存多少 token 的 hidden states；真实输入
 embedding 已经通过 vLLM 的 `prompt_embeds` 路径进入模型。
 
-### `examples/offline_inference/save_prompt_embed_hidden_states_ground_truth.py`
+### 测试脚本 `examples/offline_inference/save_prompt_embed_hidden_states_ground_truth.py`
 
 这是新增脚本，用 Hugging Face 原生 forward 保存 ground truth。
 
@@ -185,7 +173,7 @@ layer_hidden_states: (28, 16, 1024)
 vLLM can accept prompt embeddings directly and extract hidden states from selected layers for
 ```
 
-### `examples/offline_inference/prompt_embed_extract_hidden_states.py`
+### 测试脚本 `examples/offline_inference/prompt_embed_extract_hidden_states.py`
 
 这是新增验证 demo，用来跑通 vLLM 的 prompt embeddings + hidden states 提取路径。
 
@@ -514,7 +502,7 @@ round 13 b1: vs batch GT max_abs=32.0
   或调度/保存路径，重点看 round 内部分请求是否发生了 prefill 分组、cached request 分支或
   connector metadata/slot mapping 状态错误。
 
-### `examples/offline_inference/prompt_embed_async_batch_only.py`
+### 测试脚本 `examples/offline_inference/prompt_embed_async_batch_only.py`
 
 这是新增的纯 AsyncLLM batch 输出脚本。
 
@@ -741,7 +729,7 @@ expected_shape: (32, 28, 1024)
 baseline_generated_ids: [[320], [320], [320], [320], [320], [320], [320], [320]]
 ```
 
-### `demo.sh`
+### 测试脚本 `demo.sh`
 
 这是新增一键启动脚本。所有参数都已经内置，用户只需要先激活环境，然后在仓库根目录
 运行：
