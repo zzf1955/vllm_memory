@@ -28,12 +28,11 @@ connector 会把 token 长度当成 0，导致保存出来的 hidden states 为�
 这个占位 token ids 不参与模型输入，只用于告诉 connector 应该保存多少个
 prompt 位置的 hidden states。真实输入仍然是 `prompt_embeds`。
 
-## 2. 如何启动一键 demo
+## 2. demo
 
-先激活环境
-```
+先修改 demo.sh 开头的环境变量
 
-然后直接运行：
+激活环境，然后直接运行：
 
 ```bash
 bash demo.sh
