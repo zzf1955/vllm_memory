@@ -41,6 +41,10 @@ unset PYTHONPATH
 : "${HF_HUB_DISABLE_XET:=1}"
 : "${HF_HUB_DOWNLOAD_TIMEOUT:=600}"
 : "${HF_HUB_ETAG_TIMEOUT:=60}"
+: "${HF_HUB_DISABLE_PROGRESS_BARS:=0}"
+: "${HF_HUB_VERBOSITY:=info}"
+: "${TRANSFORMERS_VERBOSITY:=info}"
+: "${PYTHONUNBUFFERED:=1}"
 
 export HF_HOME
 export HUGGINGFACE_HUB_CACHE
@@ -51,6 +55,10 @@ export HF_ENDPOINT
 export HF_HUB_DISABLE_XET
 export HF_HUB_DOWNLOAD_TIMEOUT
 export HF_HUB_ETAG_TIMEOUT
+export HF_HUB_DISABLE_PROGRESS_BARS
+export HF_HUB_VERBOSITY
+export TRANSFORMERS_VERBOSITY
+export PYTHONUNBUFFERED
 
 # The original local script used a host-local proxy. In the container this
 # usually points to nothing and causes "Connection refused".
@@ -84,6 +92,30 @@ run_step() {
   echo "===== ${name} ====="
   echo "+ $*"
   "$@"
+}
+
+download_model_snapshot() {
+  "${PYTHON}" - "${MODEL}" <<'PY'
+import os
+import sys
+
+from huggingface_hub import snapshot_download
+
+model = sys.argv[1]
+print(f"Downloading/checking model snapshot: {model}", flush=True)
+print(f"HF_HOME={os.environ.get('HF_HOME')}", flush=True)
+print(
+    "HUGGINGFACE_HUB_CACHE="
+    f"{os.environ.get('HUGGINGFACE_HUB_CACHE')}",
+    flush=True,
+)
+path = snapshot_download(
+    repo_id=model,
+    repo_type="model",
+    resume_download=True,
+)
+print(f"Model snapshot is ready: {path}", flush=True)
+PY
 }
 
 print_final_summary() {
@@ -270,6 +302,8 @@ main() {
   echo "HUGGINGFACE_HUB_CACHE: ${HUGGINGFACE_HUB_CACHE}"
   echo "HF_ENDPOINT: ${HF_ENDPOINT}"
   echo "TMPDIR: ${TMPDIR}"
+  echo "HF_HUB_VERBOSITY: ${HF_HUB_VERBOSITY}"
+  echo "TRANSFORMERS_VERBOSITY: ${TRANSFORMERS_VERBOSITY}"
 
   echo
   echo "===== vLLM import check ====="
@@ -300,6 +334,9 @@ PY
 
   run_step "GPU status before run" \
     nvidia-smi --query-gpu=index,memory.used,memory.free --format=csv,noheader,nounits
+
+  run_step "Download/check Hugging Face model snapshot" \
+    download_model_snapshot
 
   cd "${DEMO_ROOT}"
 
