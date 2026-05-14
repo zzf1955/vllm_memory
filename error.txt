@@ -1,0 +1,175 @@
+Demo root: /root/workspace/vllm_memory/tmp
+Log file: /root/workspace/vllm_memory/tmp/logs/demo_20260513_073607.log
+Python: python
+GPU: 5
+Model: /root/public/models/Qwen3-0.6B
+SEQ_LEN: 16
+LAYER_IDS: all
+BATCH_SIZE: 4
+NUM_ROUNDS: 10
+GPU_MEMORY_UTILIZATION: 0.7
+MAX_MODEL_LEN: 512
+
+===== GPU status before run =====
++ nvidia-smi --query-gpu=index,memory.used,memory.free --format=csv,noheader,nounits
+0, 38353, 10156
+1, 48408, 101
+2, 46986, 1523
+3, 47584, 925
+4, 1, 48508
+5, 1, 48508
+6, 1, 48508
+7, 1, 48508
+
+===== Single sample: generate GT and run vLLM single test =====
++ python examples/offline_inference/prompt_embed_single_demo.py --model /root/public/models/Qwen3-0.6B --run-root /root/workspace/vllm_memory/tmp/single --gpu 5 --seq-len 16 --layer-ids all --dtype bfloat16 --max-model-len 512 --gpu-memory-utilization 0.7
+===== Single Demo Config =====
+model: /root/public/models/Qwen3-0.6B
+gpu: 5
+seq_len: 16
+layer_ids: all
+run_root: /root/workspace/vllm_memory/tmp/single
+
+===== Generate Single Ground Truth =====
++ /usr/bin/python examples/offline_inference/save_prompt_embed_hidden_states_ground_truth.py --model /root/public/models/Qwen3-0.6B --seq-len 16 --device cuda --dtype bfloat16 --output /root/workspace/vllm_memory/tmp/single/single_gt.pth
+
+Loading weights:   0%|          | 0/311 [00:00<?, ?it/s]
+Loading weights: 100%|██████████| 311/311 [00:00<00:00, 8200.70it/s]
+Saved ground truth:
+  prompt: /root/workspace/vllm_memory/tmp/single/single_gt.prompt.txt
+  input:  /root/workspace/vllm_memory/tmp/single/single_gt.input.pth
+  output: /root/workspace/vllm_memory/tmp/single/single_gt.output.pth
+Model: /root/public/models/Qwen3-0.6B
+Prompt tokens: 16
+prompt_embeds shape: (16, 1024)
+hidden_states shape: (29, 16, 1024)
+layer_hidden_states shape: (28, 16, 1024)
+
+===== vLLM Single Prompt-Embeds Test =====
++ /usr/bin/python examples/offline_inference/prompt_embed_extract_hidden_states.py --model /root/public/models/Qwen3-0.6B --input-pth /root/workspace/vllm_memory/tmp/single/single_gt.input.pth --output-pth /root/workspace/vllm_memory/tmp/single/single_gt.output.pth --work-dir /root/workspace/vllm_memory/tmp/single/vllm-single --layer-ids all --max-model-len 512 --gpu-memory-utilization 0.7 --dtype bfloat16
+INFO 05-13 07:36:26 [utils.py:233] non-default args: {'trust_remote_code': True, 'dtype': 'bfloat16', 'max_model_len': 512, 'enable_prefix_caching': False, 'gpu_memory_utilization': 0.7, 'disable_log_stats': True, 'enforce_eager': True, 'speculative_config': {'method': 'extract_hidden_states', 'num_speculative_tokens': 1, 'draft_model_config': {'hf_config': {'eagle_aux_hidden_state_layer_ids': [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28]}}}, 'kv_transfer_config': KVTransferConfig(kv_connector='ExampleHiddenStatesConnector', engine_id='acb17aa1-64c6-4e7f-9a7b-6eaa56530d40', kv_buffer_device='cuda', kv_buffer_size=1000000000.0, kv_role='kv_producer', kv_rank=None, kv_parallel_size=1, kv_ip='127.0.0.1', kv_port=14579, kv_connector_extra_config={'shared_storage_path': '/root/workspace/vllm_memory/tmp/single/vllm-single/llm-token-prompt'}, kv_connector_module_path=None, enable_permute_local_kv=False, kv_load_failure_policy='fail'), 'model': '/root/public/models/Qwen3-0.6B'}
+INFO 05-13 07:36:26 [model.py:533] Resolved architecture: Qwen3ForCausalLM
+INFO 05-13 07:36:26 [model.py:1582] Using max model len 512
+INFO 05-13 07:36:26 [scheduler.py:231] Chunked prefill is enabled with max_num_batched_tokens=8192.
+INFO 05-13 07:36:26 [vllm.py:754] Asynchronous scheduling is enabled.
+WARNING 05-13 07:36:26 [vllm.py:788] Enforce eager set, disabling torch.compile and CUDAGraphs. This is equivalent to setting -cc.mode=none -cc.cudagraph_mode=none
+WARNING 05-13 07:36:26 [vllm.py:799] Inductor compilation was disabled by user settings, optimizations settings that are only active during inductor compilation will be ignored.
+INFO 05-13 07:36:27 [vllm.py:964] Cudagraph is disabled under eager mode
+WARNING 05-13 07:36:27 [vllm.py:1168] Turning off hybrid kv cache manager because `--kv-transfer-config` is set. This will reduce the performance of vLLM on LLMs with sliding window attention or Mamba attention. If you are a developer of kv connector, please consider supporting hybrid kv cache manager for your connector by making sure your connector is a subclass of `SupportsHMA` defined in kv_connector/v1/base.py and use --no-disable-hybrid-kv-cache-manager to start vLLM.
+INFO 05-13 07:36:27 [compilation.py:289] Enabled custom fusions: norm_quant, act_quant
+(EngineCore pid=239292) INFO 05-13 07:36:27 [core.py:103] Initializing a V1 LLM engine (v0.18.0) with config: model='/root/public/models/Qwen3-0.6B', speculative_config=SpeculativeConfig(method='extract_hidden_states', model=None, num_spec_tokens=1), tokenizer='/root/public/models/Qwen3-0.6B', skip_tokenizer_init=False, tokenizer_mode=auto, revision=None, tokenizer_revision=None, trust_remote_code=True, dtype=torch.bfloat16, max_seq_len=512, download_dir=None, load_format=auto, tensor_parallel_size=1, pipeline_parallel_size=1, data_parallel_size=1, decode_context_parallel_size=1, dcp_comm_backend=ag_rs, disable_custom_all_reduce=False, quantization=None, enforce_eager=True, enable_return_routed_experts=False, kv_cache_dtype=auto, device_config=cuda, structured_outputs_config=StructuredOutputsConfig(backend='auto', disable_any_whitespace=False, disable_additional_properties=False, reasoning_parser='', reasoning_parser_plugin='', enable_in_reasoning=False), observability_config=ObservabilityConfig(show_hidden_metrics_for_version=None, otlp_traces_endpoint=None, collect_detailed_traces=None, kv_cache_metrics=False, kv_cache_metrics_sample=0.01, cudagraph_metrics=False, enable_layerwise_nvtx_tracing=False, enable_mfu_metrics=False, enable_mm_processor_stats=False, enable_logging_iteration_details=False), seed=0, served_model_name=/root/public/models/Qwen3-0.6B, enable_prefix_caching=False, enable_chunked_prefill=True, pooler_config=None, compilation_config={'mode': <CompilationMode.NONE: 0>, 'debug_dump_path': None, 'cache_dir': '', 'compile_cache_save_format': 'binary', 'backend': 'inductor', 'custom_ops': ['all'], 'splitting_ops': [], 'compile_mm_encoder': False, 'compile_sizes': [], 'compile_ranges_endpoints': [8192], 'inductor_compile_config': {'enable_auto_functionalized_v2': False, 'combo_kernels': True, 'benchmark_combo_kernel': True}, 'inductor_passes': {}, 'cudagraph_mode': <CUDAGraphMode.NONE: 0>, 'cudagraph_num_of_warmups': 0, 'cudagraph_capture_sizes': [], 'cudagraph_copy_inputs': False, 'cudagraph_specialize_lora': True, 'use_inductor_graph_partition': False, 'pass_config': {'fuse_norm_quant': True, 'fuse_act_quant': True, 'fuse_attn_quant': False, 'enable_sp': False, 'fuse_gemm_comms': False, 'fuse_allreduce_rms': False}, 'max_cudagraph_capture_size': 0, 'dynamic_shapes_config': {'type': <DynamicShapesType.BACKED: 'backed'>, 'evaluate_guards': False, 'assume_32_bit_indexing': False}, 'local_cache_dir': None, 'fast_moe_cold_start': False, 'static_all_moe_layers': []}
+(EngineCore pid=239292) INFO 05-13 07:36:28 [parallel_state.py:1395] world_size=1 rank=0 local_rank=0 distributed_init_method=tcp://192.168.1.103:7903 backend=nccl
+(EngineCore pid=239292) INFO 05-13 07:36:28 [parallel_state.py:1717] rank 0 in world size 1 is assigned as DP rank 0, PP rank 0, PCP rank 0, TP rank 0, EP rank N/A, EPLB rank N/A
+(EngineCore pid=239292) WARNING 05-13 07:36:28 [__init__.py:204] min_p and logit_bias parameters won't work with speculative decoding.
+(EngineCore pid=239292) INFO 05-13 07:36:28 [gpu_model_runner.py:4481] Starting to load model /root/public/models/Qwen3-0.6B...
+(EngineCore pid=239292) INFO 05-13 07:36:29 [cuda.py:317] Using FLASH_ATTN attention backend out of potential backends: ['FLASH_ATTN', 'FLASHINFER', 'TRITON_ATTN', 'FLEX_ATTENTION'].
+(EngineCore pid=239292) INFO 05-13 07:36:29 [flash_attn.py:598] Using FlashAttention version 2
+(EngineCore pid=239292) 
+Loading safetensors checkpoint shards:   0% Completed | 0/1 [00:00<?, ?it/s]
+(EngineCore pid=239292) 
+Loading safetensors checkpoint shards: 100% Completed | 1/1 [00:00<00:00,  4.37it/s]
+(EngineCore pid=239292) 
+Loading safetensors checkpoint shards: 100% Completed | 1/1 [00:00<00:00,  4.37it/s]
+(EngineCore pid=239292) 
+(EngineCore pid=239292) INFO 05-13 07:36:29 [default_loader.py:384] Loading weights took 0.26 seconds
+(EngineCore pid=239292) INFO 05-13 07:36:29 [gpu_model_runner.py:4505] Loading drafter model...
+(EngineCore pid=239292) <frozen importlib._bootstrap_external>:1297: FutureWarning: The cuda.cudart module is deprecated and will be removed in a future release, please switch to use the cuda.bindings.runtime module instead.
+(EngineCore pid=239292) <frozen importlib._bootstrap_external>:1297: FutureWarning: The cuda.nvrtc module is deprecated and will be removed in a future release, please switch to use the cuda.bindings.nvrtc module instead.
+(EngineCore pid=239292) INFO 05-13 07:36:29 [default_loader.py:384] Loading weights took 1980373.17 seconds
+(EngineCore pid=239292) INFO 05-13 07:36:29 [gpu_model_runner.py:4543] Using auxiliary layers from speculative config: (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28)
+(EngineCore pid=239292) INFO 05-13 07:36:30 [gpu_model_runner.py:4566] Model loading took 1.12 GiB memory and 0.783358 seconds
+(EngineCore pid=239292) INFO 05-13 07:36:31 [gpu_worker.py:456] Available KV cache memory: 30.76 GiB
+(EngineCore pid=239292) INFO 05-13 07:36:31 [kv_cache_utils.py:1316] GPU KV cache size: 191,984 tokens
+(EngineCore pid=239292) INFO 05-13 07:36:31 [kv_cache_utils.py:1321] Maximum concurrency for 512 tokens per request: 374.97x
+(EngineCore pid=239292) INFO 05-13 07:36:31 [factory.py:64] Creating v1 connector with name: ExampleHiddenStatesConnector and engine_id: acb17aa1-64c6-4e7f-9a7b-6eaa56530d40
+(EngineCore pid=239292) WARNING 05-13 07:36:31 [base.py:189] Initializing KVConnectorBase_V1. This API is experimental and subject to change in the future as we iterate the design.
+(EngineCore pid=239292) INFO 05-13 07:36:31 [example_hidden_states_connector.py:135] KVTransferConfig(kv_connector='ExampleHiddenStatesConnector', engine_id='acb17aa1-64c6-4e7f-9a7b-6eaa56530d40', kv_buffer_device='cuda', kv_buffer_size=1000000000.0, kv_role='kv_producer', kv_rank=None, kv_parallel_size=1, kv_ip='127.0.0.1', kv_port=14579, kv_connector_extra_config={'shared_storage_path': '/root/workspace/vllm_memory/tmp/single/vllm-single/llm-token-prompt'}, kv_connector_module_path=None, enable_permute_local_kv=False, kv_load_failure_policy='fail')
+(EngineCore pid=239292) INFO 05-13 07:36:31 [example_hidden_states_connector.py:136] Shared storage path is /root/workspace/vllm_memory/tmp/single/vllm-single/llm-token-prompt
+(EngineCore pid=239292) INFO 05-13 07:36:31 [core.py:281] init engine (profile, create kv cache, warmup model) took 1.48 seconds
+(EngineCore pid=239292) INFO 05-13 07:36:32 [factory.py:64] Creating v1 connector with name: ExampleHiddenStatesConnector and engine_id: acb17aa1-64c6-4e7f-9a7b-6eaa56530d40
+(EngineCore pid=239292) WARNING 05-13 07:36:32 [base.py:189] Initializing KVConnectorBase_V1. This API is experimental and subject to change in the future as we iterate the design.
+(EngineCore pid=239292) INFO 05-13 07:36:32 [example_hidden_states_connector.py:135] KVTransferConfig(kv_connector='ExampleHiddenStatesConnector', engine_id='acb17aa1-64c6-4e7f-9a7b-6eaa56530d40', kv_buffer_device='cuda', kv_buffer_size=1000000000.0, kv_role='kv_producer', kv_rank=None, kv_parallel_size=1, kv_ip='127.0.0.1', kv_port=14579, kv_connector_extra_config={'shared_storage_path': '/root/workspace/vllm_memory/tmp/single/vllm-single/llm-token-prompt'}, kv_connector_module_path=None, enable_permute_local_kv=False, kv_load_failure_policy='fail')
+(EngineCore pid=239292) INFO 05-13 07:36:32 [example_hidden_states_connector.py:136] Shared storage path is /root/workspace/vllm_memory/tmp/single/vllm-single/llm-token-prompt
+(EngineCore pid=239292) WARNING 05-13 07:36:32 [vllm.py:788] Enforce eager set, disabling torch.compile and CUDAGraphs. This is equivalent to setting -cc.mode=none -cc.cudagraph_mode=none
+(EngineCore pid=239292) WARNING 05-13 07:36:32 [vllm.py:799] Inductor compilation was disabled by user settings, optimizations settings that are only active during inductor compilation will be ignored.
+(EngineCore pid=239292) INFO 05-13 07:36:32 [vllm.py:964] Cudagraph is disabled under eager mode
+INFO 05-13 07:36:32 [llm.py:391] Supported tasks: ['generate']
+
+Rendering prompts:   0%|          | 0/1 [00:00<?, ?it/s]
+Rendering prompts: 100%|██████████| 1/1 [00:00<00:00, 64.56it/s]
+
+Processed prompts:   0%|          | 0/1 [00:00<?, ?it/s, est. speed input: 0.00 toks/s, output: 0.00 toks/s]
+Processed prompts: 100%|██████████| 1/1 [00:00<00:00, 11.11it/s, est. speed input: 177.94 toks/s, output: 11.11 toks/s]
+Processed prompts: 100%|██████████| 1/1 [00:00<00:00, 11.06it/s, est. speed input: 177.94 toks/s, output: 11.11 toks/s]
+(EngineCore pid=239292) INFO 05-13 07:36:32 [core.py:1201] Shutdown initiated (timeout=0)
+(EngineCore pid=239292) INFO 05-13 07:36:32 [core.py:1224] Shutdown complete
+/root/workspace/vllm_memory/tmp/single/vllm-single/llm-token-prompt/0-b2caf392.safetensors
+INFO 05-13 07:36:32 [model.py:533] Resolved architecture: Qwen3ForCausalLM
+INFO 05-13 07:36:32 [model.py:1582] Using max model len 512
+INFO 05-13 07:36:32 [scheduler.py:231] Chunked prefill is enabled with max_num_batched_tokens=2048.
+WARNING 05-13 07:36:32 [vllm.py:788] Enforce eager set, disabling torch.compile and CUDAGraphs. This is equivalent to setting -cc.mode=none -cc.cudagraph_mode=none
+WARNING 05-13 07:36:32 [vllm.py:799] Inductor compilation was disabled by user settings, optimizations settings that are only active during inductor compilation will be ignored.
+INFO 05-13 07:36:32 [vllm.py:964] Cudagraph is disabled under eager mode
+WARNING 05-13 07:36:32 [vllm.py:1168] Turning off hybrid kv cache manager because `--kv-transfer-config` is set. This will reduce the performance of vLLM on LLMs with sliding window attention or Mamba attention. If you are a developer of kv connector, please consider supporting hybrid kv cache manager for your connector by making sure your connector is a subclass of `SupportsHMA` defined in kv_connector/v1/base.py and use --no-disable-hybrid-kv-cache-manager to start vLLM.
+(EngineCore pid=239681) INFO 05-13 07:36:33 [core.py:103] Initializing a V1 LLM engine (v0.18.0) with config: model='/root/public/models/Qwen3-0.6B', speculative_config=SpeculativeConfig(method='extract_hidden_states', model=None, num_spec_tokens=1), tokenizer='/root/public/models/Qwen3-0.6B', skip_tokenizer_init=False, tokenizer_mode=auto, revision=None, tokenizer_revision=None, trust_remote_code=True, dtype=torch.bfloat16, max_seq_len=512, download_dir=None, load_format=auto, tensor_parallel_size=1, pipeline_parallel_size=1, data_parallel_size=1, decode_context_parallel_size=1, dcp_comm_backend=ag_rs, disable_custom_all_reduce=False, quantization=None, enforce_eager=True, enable_return_routed_experts=False, kv_cache_dtype=auto, device_config=cuda, structured_outputs_config=StructuredOutputsConfig(backend='auto', disable_any_whitespace=False, disable_additional_properties=False, reasoning_parser='', reasoning_parser_plugin='', enable_in_reasoning=False), observability_config=ObservabilityConfig(show_hidden_metrics_for_version=None, otlp_traces_endpoint=None, collect_detailed_traces=None, kv_cache_metrics=False, kv_cache_metrics_sample=0.01, cudagraph_metrics=False, enable_layerwise_nvtx_tracing=False, enable_mfu_metrics=False, enable_mm_processor_stats=False, enable_logging_iteration_details=False), seed=0, served_model_name=/root/public/models/Qwen3-0.6B, enable_prefix_caching=False, enable_chunked_prefill=True, pooler_config=None, compilation_config={'mode': <CompilationMode.NONE: 0>, 'debug_dump_path': None, 'cache_dir': '', 'compile_cache_save_format': 'binary', 'backend': 'inductor', 'custom_ops': ['all'], 'splitting_ops': [], 'compile_mm_encoder': False, 'compile_sizes': [], 'compile_ranges_endpoints': [2048], 'inductor_compile_config': {'enable_auto_functionalized_v2': False, 'combo_kernels': True, 'benchmark_combo_kernel': True}, 'inductor_passes': {}, 'cudagraph_mode': <CUDAGraphMode.NONE: 0>, 'cudagraph_num_of_warmups': 0, 'cudagraph_capture_sizes': [], 'cudagraph_copy_inputs': False, 'cudagraph_specialize_lora': True, 'use_inductor_graph_partition': False, 'pass_config': {'fuse_norm_quant': True, 'fuse_act_quant': True, 'fuse_attn_quant': False, 'enable_sp': False, 'fuse_gemm_comms': False, 'fuse_allreduce_rms': False}, 'max_cudagraph_capture_size': 0, 'dynamic_shapes_config': {'type': <DynamicShapesType.BACKED: 'backed'>, 'evaluate_guards': False, 'assume_32_bit_indexing': False}, 'local_cache_dir': None, 'fast_moe_cold_start': False, 'static_all_moe_layers': []}
+(EngineCore pid=239681) INFO 05-13 07:36:33 [parallel_state.py:1395] world_size=1 rank=0 local_rank=0 distributed_init_method=tcp://192.168.1.103:7011 backend=nccl
+(EngineCore pid=239681) INFO 05-13 07:36:33 [parallel_state.py:1717] rank 0 in world size 1 is assigned as DP rank 0, PP rank 0, PCP rank 0, TP rank 0, EP rank N/A, EPLB rank N/A
+(EngineCore pid=239681) WARNING 05-13 07:36:34 [__init__.py:204] min_p and logit_bias parameters won't work with speculative decoding.
+(EngineCore pid=239681) INFO 05-13 07:36:34 [gpu_model_runner.py:4481] Starting to load model /root/public/models/Qwen3-0.6B...
+(EngineCore pid=239681) INFO 05-13 07:36:34 [cuda.py:317] Using FLASH_ATTN attention backend out of potential backends: ['FLASH_ATTN', 'FLASHINFER', 'TRITON_ATTN', 'FLEX_ATTENTION'].
+(EngineCore pid=239681) INFO 05-13 07:36:34 [flash_attn.py:598] Using FlashAttention version 2
+(EngineCore pid=239681) 
+Loading safetensors checkpoint shards:   0% Completed | 0/1 [00:00<?, ?it/s]
+(EngineCore pid=239681) 
+Loading safetensors checkpoint shards: 100% Completed | 1/1 [00:00<00:00,  4.34it/s]
+(EngineCore pid=239681) 
+Loading safetensors checkpoint shards: 100% Completed | 1/1 [00:00<00:00,  4.34it/s]
+(EngineCore pid=239681) 
+(EngineCore pid=239681) INFO 05-13 07:36:35 [default_loader.py:384] Loading weights took 0.26 seconds
+(EngineCore pid=239681) INFO 05-13 07:36:35 [gpu_model_runner.py:4505] Loading drafter model...
+(EngineCore pid=239681) <frozen importlib._bootstrap_external>:1297: FutureWarning: The cuda.cudart module is deprecated and will be removed in a future release, please switch to use the cuda.bindings.runtime module instead.
+(EngineCore pid=239681) <frozen importlib._bootstrap_external>:1297: FutureWarning: The cuda.nvrtc module is deprecated and will be removed in a future release, please switch to use the cuda.bindings.nvrtc module instead.
+(EngineCore pid=239681) INFO 05-13 07:36:35 [default_loader.py:384] Loading weights took 1980378.52 seconds
+(EngineCore pid=239681) INFO 05-13 07:36:35 [gpu_model_runner.py:4543] Using auxiliary layers from speculative config: (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28)
+(EngineCore pid=239681) INFO 05-13 07:36:35 [gpu_model_runner.py:4566] Model loading took 1.12 GiB memory and 0.785216 seconds
+(EngineCore pid=239681) INFO 05-13 07:36:37 [gpu_worker.py:456] Available KV cache memory: 31.31 GiB
+(EngineCore pid=239681) INFO 05-13 07:36:37 [kv_cache_utils.py:1316] GPU KV cache size: 195,440 tokens
+(EngineCore pid=239681) INFO 05-13 07:36:37 [kv_cache_utils.py:1321] Maximum concurrency for 512 tokens per request: 381.72x
+(EngineCore pid=239681) INFO 05-13 07:36:37 [factory.py:64] Creating v1 connector with name: ExampleHiddenStatesConnector and engine_id: 2b99c0f9-076b-424d-b636-6cdc8c9949a2
+(EngineCore pid=239681) WARNING 05-13 07:36:37 [base.py:189] Initializing KVConnectorBase_V1. This API is experimental and subject to change in the future as we iterate the design.
+(EngineCore pid=239681) INFO 05-13 07:36:37 [example_hidden_states_connector.py:135] KVTransferConfig(kv_connector='ExampleHiddenStatesConnector', engine_id='2b99c0f9-076b-424d-b636-6cdc8c9949a2', kv_buffer_device='cuda', kv_buffer_size=1000000000.0, kv_role='kv_producer', kv_rank=None, kv_parallel_size=1, kv_ip='127.0.0.1', kv_port=14579, kv_connector_extra_config={'shared_storage_path': '/root/workspace/vllm_memory/tmp/single/vllm-single/async-prompt-embeds'}, kv_connector_module_path=None, enable_permute_local_kv=False, kv_load_failure_policy='fail')
+(EngineCore pid=239681) INFO 05-13 07:36:37 [example_hidden_states_connector.py:136] Shared storage path is /root/workspace/vllm_memory/tmp/single/vllm-single/async-prompt-embeds
+(EngineCore pid=239681) INFO 05-13 07:36:37 [core.py:281] init engine (profile, create kv cache, warmup model) took 1.43 seconds
+(EngineCore pid=239681) INFO 05-13 07:36:37 [factory.py:64] Creating v1 connector with name: ExampleHiddenStatesConnector and engine_id: 2b99c0f9-076b-424d-b636-6cdc8c9949a2
+(EngineCore pid=239681) WARNING 05-13 07:36:37 [base.py:189] Initializing KVConnectorBase_V1. This API is experimental and subject to change in the future as we iterate the design.
+(EngineCore pid=239681) INFO 05-13 07:36:37 [example_hidden_states_connector.py:135] KVTransferConfig(kv_connector='ExampleHiddenStatesConnector', engine_id='2b99c0f9-076b-424d-b636-6cdc8c9949a2', kv_buffer_device='cuda', kv_buffer_size=1000000000.0, kv_role='kv_producer', kv_rank=None, kv_parallel_size=1, kv_ip='127.0.0.1', kv_port=14579, kv_connector_extra_config={'shared_storage_path': '/root/workspace/vllm_memory/tmp/single/vllm-single/async-prompt-embeds'}, kv_connector_module_path=None, enable_permute_local_kv=False, kv_load_failure_policy='fail')
+(EngineCore pid=239681) INFO 05-13 07:36:37 [example_hidden_states_connector.py:136] Shared storage path is /root/workspace/vllm_memory/tmp/single/vllm-single/async-prompt-embeds
+(EngineCore pid=239681) WARNING 05-13 07:36:37 [vllm.py:788] Enforce eager set, disabling torch.compile and CUDAGraphs. This is equivalent to setting -cc.mode=none -cc.cudagraph_mode=none
+(EngineCore pid=239681) WARNING 05-13 07:36:37 [vllm.py:799] Inductor compilation was disabled by user settings, optimizations settings that are only active during inductor compilation will be ignored.
+(EngineCore pid=239681) INFO 05-13 07:36:37 [vllm.py:964] Cudagraph is disabled under eager mode
+WARNING 05-13 07:36:37 [input_processor.py:227] Passing raw prompts to InputProcessor is deprecated and will be removed in v0.18. You should instead pass the outputs of Renderer.render_cmpl() or Renderer.render_chat().
+(EngineCore pid=239681) INFO 05-13 07:36:37 [core.py:1201] Shutdown initiated (timeout=0)
+(EngineCore pid=239681) INFO 05-13 07:36:37 [core.py:1224] Shutdown complete
+RequestOutput(request_id=prompt-embeds-extract-hidden-states, prompt='vLLM can accept prompt embeddings directly and extract hidden states from selected layers for', prompt_token_ids=[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], encoder_prompt=None, encoder_prompt_token_ids=None, prompt_logprobs=None, outputs=[CompletionOutput(index=0, text=' the', token_ids=[279], routed_experts=None, cumulative_logprob=None, logprobs=None, finish_reason=length, stop_reason=None)], finished=True, metrics=RequestStateStats(num_generation_tokens=1, arrival_time=1778657797.7986174, queued_ts=1980381.054142956, scheduled_ts=1980381.054156956, first_token_ts=1980381.114057425, last_token_ts=1980381.114057425, first_token_latency=0.06274056434631348, is_corrupted=False), lora_request=None, num_cached_tokens=0)=
+/root/workspace/vllm_memory/tmp/single/vllm-single/async-prompt-embeds/prompt-embeds-extract-hidden-states-a6ec5a92.safetensors
+embed_tensors['hidden_states'].shape=torch.Size([0, 28, 1024])
+token_tensors['hidden_states'].shape=torch.Size([16, 28, 1024])
+Traceback (most recent call last):
+  File "/root/workspace/vllm_memory/examples/offline_inference/prompt_embed_extract_hidden_states.py", line 402, in <module>
+    main()
+  File "/root/workspace/vllm_memory/examples/offline_inference/prompt_embed_extract_hidden_states.py", line 370, in main
+    hidden_compare = allclose_stats(
+                     ^^^^^^^^^^^^^^^
+  File "/root/workspace/vllm_memory/examples/offline_inference/prompt_embed_extract_hidden_states.py", line 198, in allclose_stats
+    diff = (actual - expected).abs()
+            ~~~~~~~^~~~~~~~~~
+RuntimeError: The size of tensor a (0) must match the size of tensor b (16) at non-singleton dimension 0
+Traceback (most recent call last):
+  File "/root/workspace/vllm_memory/examples/offline_inference/prompt_embed_single_demo.py", line 132, in <module>
+    main()
+  File "/root/workspace/vllm_memory/examples/offline_inference/prompt_embed_single_demo.py", line 88, in main
+    output = run_command(
+             ^^^^^^^^^^^^
+  File "/root/workspace/vllm_memory/examples/offline_inference/prompt_embed_single_demo.py", line 47, in run_command
+    raise subprocess.CalledProcessError(
+subprocess.CalledProcessError: Command '['/usr/bin/python', 'examples/offline_inference/prompt_embed_extract_hidden_states.py', '--model', '/root/public/models/Qwen3-0.6B', '--input-pth', '/root/workspace/vllm_memory/tmp/single/single_gt.input.pth', '--output-pth', '/root/workspace/vllm_memory/tmp/single/single_gt.output.pth', '--work-dir', '/root/workspace/vllm_memory/tmp/single/vllm-single', '--layer-ids', 'all', '--max-model-len', '512', '--gpu-memory-utilization', '0.7', '--dtype', 'bfloat16']' returned non-zero exit status 1.

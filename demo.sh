@@ -105,3 +105,27 @@ main() {
 }
 
 main 2>&1 | tee "${LOG_FILE}"
+
+ -e NVIDIA_DISABLE_REQUIRE=1
+
+docker run -d \
+  --name vllm-memory-repro \
+  --gpus '"device=3"' \
+  --ipc=host \
+  --shm-size=32g \
+  --ulimit memlock=-1 \
+  --ulimit stack=67108864 \
+  -p 2333:2333 \
+  -e NVIDIA_DISABLE_REQUIRE=1 \
+  -v /root/public/models:/root/public/models:ro \
+  verlai/verl:vllm018.dev1 \
+  sleep infinity
+
+python - <<'PY'
+import torch
+print(torch.__version__)
+print(torch.version.cuda)
+print(torch.cuda.is_available())
+print(torch.cuda.get_device_name(0) if torch.cuda.is_available() else None)
+print(torch.ones(1, device="cuda") if torch.cuda.is_available() else None)
+PY
