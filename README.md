@@ -1,5 +1,7 @@
 # vLLM Prompt Embeds Hidden States Demo
 
+## start
+
 说明：
 
 - 这个仓库是完整的 vLLM 包。为了避免在目标容器里重新安装整个 vLLM，
@@ -72,7 +74,30 @@ bash docker_demo.sh
 注：`docker_demo.sh` 里可以修改显存使用比例 `GPU_MEMORY_UTILIZATION`。
 当前默认是 `0.1`，因为 demo 只用了 `Qwen/Qwen3-0.6B` 这个 0.6B 模型。
 
-## 1. Runtime 改了哪里
+## input/output
+
+输入是拼接后的 prompt embedding 序列：
+
+```text
+<random tensor> <prompt emb> <random tensor>
+```
+
+默认配置下，前后两段 random tensor 各 8 个位置，中间 prompt embedding 为 16
+个位置，因此实际输入长度为 32。
+
+输出是所有选定 layer 的 hidden states。默认 `LAYER_IDS=all`，即比较所有
+layer。测试会分别跑 single sequence 和 batch sequence，并把 AsyncLLM 输出
+与 `LLM.generate()` 生成的 Ground Truth 做逐元素误差对比。
+
+结果会输出两组 summary：
+
+- `single_vs_single`：AsyncLLM single 输出 vs `LLM.generate()` single Ground Truth。
+- `batch_vs_batch`：AsyncLLM batch 输出 vs `LLM.generate()` batch Ground Truth。
+
+运行产物包括 single sequence 目录、batch sequence 目录和 `docker_demo.sh`
+生成的 log 文件；具体路径会在脚本最后的 summary 中打印。
+
+## Runtime 修改位置
 
 核心 runtime 修改只有一处：
 
@@ -99,90 +124,3 @@ connector 会把 token 长度当成 0，导致保存出来的 hidden states 为�
 
 这个占位 token ids 不参与模型输入，只用于告诉 connector 应该保存多少个
 prompt 位置的 hidden states。真实输入仍然是 `prompt_embeds`。
-
-## 2. demo
-
-先修改 demo.sh 开头的环境变量
-
-激活环境，然后直接运行：
-
-```bash
-bash demo.sh
-```
-
-`demo.sh` 已经内置所有参数，不需要额外传参。
-
-当前默认配置：
-
-```text
-GPU=1
-MODEL=Qwen/Qwen3-0.6B
-SEQ_LEN=16
-LAYER_IDS=all
-BATCH_SIZE=4
-NUM_ROUNDS=10
-DTYPE=bfloat16
-RUN_ROOT=/disk_n/zzf/tmp/vllm_prompt_embed_hidden_states_demo
-```
-
-一键 demo 会串行运行两个测试：
-
-```text
-1. examples/offline_inference/prompt_embed_single_demo.py
-2. examples/offline_inference/prompt_embed_batch_demo.py
-```
-
-预期关键输出：
-
-```text
-SINGLE_DEMO_RESULT: PASS
-BATCH_DEMO_RESULT: PASS
-```
-
-日志和 `.pth` 输出在：
-
-```text
-/disk_n/zzf/tmp/vllm_prompt_embed_hidden_states_demo
-```
-
-## 3. single seq 和 batch seq 的问题
-
-当前测试里发现一个重要现象：
-
-```text
-同一个 prompt_embeds，单条请求推理和 batch 请求推理的 hidden states
-可能存在数值差异。
-```
-
-所以 batch demo 里生成两种 ground truth：
-
-```text
-single GT: 每个样例单独用 LLM.generate 跑。
-batch GT: 整个 batch 一次性用 LLM.generate 跑。
-```
-
-batch 测试的通过标准是：
-
-```text
-AsyncLLM batch prompt_embeds 输出 == batch GT
-```
-
-不是和 single GT 比较。
-
-原因是 vLLM 在 single sequence 和 batch sequence 下可能走不同 kernel /
-不同调度路径，FlashAttention 等算子也可能带来数值差异。因此 single-vs-batch
-差异会单独打印出来，但不作为 batch demo 的失败条件。
-
-## 4. 详细文档
-
-使用方式、输出说明和测试行为：
-
-```text
-PROMPT_EMBED_HIDDEN_STATES_USAGE.md
-```
-
-完整修改记录、脚本说明和 runtime 细节：
-
-```text
-PROMPT_EMBED_HIDDEN_STATES_CHANGES.md
-```
