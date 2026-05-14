@@ -7,7 +7,8 @@
 - `vllm-memory-demo/setup.sh` 会把 patched connector 覆盖到容器中已安装的
   vLLM package，并把 demo 脚本安装到 `/home/dpsk_a2a/vllm-memory-demo`。
 
-docker rm -f vllm-memory-repro-patch 2>/dev/null || true
+```bash
+docker rm -f vllm-memory-repro-patch 2>/dev/null || true # 避免重名，先删一下
 
 docker run -dit \
 --name vllm-memory-repro-patch \
@@ -29,21 +30,27 @@ docker run -dit \
 -v /root/public/models:/root/public/models:ro \
 docker.1ms.run/verlai/verl:vllm018.dev1 \
 bash
+```
 
 注：`docker.1ms.run/verlai/verl:vllm018.dev1` 是镜像源地址和当前示例 tag。
 如果镜像源或版本不同，需要改这里的 registry/tag。
 
+```bash
 docker exec -it vllm-memory-repro-patch bash
+```
 
 容器内：
 
+```bash
 set -euo pipefail
 
 git clone https://gh-proxy.com/https://github.com/zzf1955/vllm_memory.git vllm-memory-src
+```
 
 注：`https://gh-proxy.com/https://github.com/zzf1955/vllm_memory.git` 是
 GitHub clone 镜像源。如果网络能直连 GitHub，可以改成原始仓库地址。
 
+```bash
 cd /home/dpsk_a2a/vllm-memory-src/vllm-memory-demo
 bash setup.sh
 
@@ -60,6 +67,7 @@ HF_HUB_VERBOSITY=info \
 TRANSFORMERS_VERBOSITY=info \
 PYTHONUNBUFFERED=1 \
 bash docker_demo.sh
+```
 
 注：`docker_demo.sh` 里可以修改显存使用比例 `GPU_MEMORY_UTILIZATION`。
 当前默认是 `0.1`，因为 demo 只用了 `Qwen/Qwen3-0.6B` 这个 0.6B 模型。
