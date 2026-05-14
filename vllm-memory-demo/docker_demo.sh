@@ -26,6 +26,7 @@ unset PYTHONPATH
 : "${SEQ_LEN:=16}"
 : "${BATCH_SIZE:=4}"
 : "${NUM_ROUNDS:=10}"
+: "${MEM_LEN:=8}"
 : "${GPU_MEMORY_UTILIZATION:=0.1}"
 : "${MAX_MODEL_LEN:=512}"
 : "${LAYER_IDS:=all}"
@@ -59,6 +60,7 @@ export HF_HUB_DISABLE_PROGRESS_BARS
 export HF_HUB_VERBOSITY
 export TRANSFORMERS_VERBOSITY
 export PYTHONUNBUFFERED
+export CUDA_VISIBLE_DEVICES="${GPU}"
 
 # The original local script used a host-local proxy. In the container this
 # usually points to nothing and causes "Connection refused".
@@ -122,41 +124,22 @@ print_final_summary() {
   echo
   echo "===== FINAL SUMMARY ====="
   "${PYTHON}" - \
-    "${SINGLE_ROOT}/single_gt.prompt.txt" \
     "${SINGLE_ROOT}/single_gt.input.pth" \
     "${LOG_FILE}" \
     "${BATCH_SIZE}" \
-    "${NUM_ROUNDS}" <<'PY'
+    "${NUM_ROUNDS}" \
+    "${MEM_LEN}" <<'PY'
 import ast
 import sys
 from pathlib import Path
 
 import torch
 
-prompt_path = Path(sys.argv[1])
-input_path = Path(sys.argv[2])
-log_path = Path(sys.argv[3])
-batch_size = int(sys.argv[4])
-num_rounds = int(sys.argv[5])
-
-
-def read_prompt_sections(path: Path) -> dict[str, str]:
-    sections: dict[str, str] = {}
-    if not path.exists():
-        return sections
-    current: str | None = None
-    values: list[str] = []
-    for line in path.read_text(encoding="utf-8").splitlines():
-        if line in {"text:", "effective_text:"}:
-            if current is not None:
-                sections[current] = "\n".join(values)
-            current = line[:-1]
-            values = []
-        elif current is not None:
-            values.append(line)
-    if current is not None:
-        sections[current] = "\n".join(values).rstrip()
-    return sections
+input_path = Path(sys.argv[1])
+log_path = Path(sys.argv[2])
+batch_size = int(sys.argv[3])
+num_rounds = int(sys.argv[4])
+mem_len = int(sys.argv[5])
 
 
 def last_value(lines: list[str], prefix: str) -> str | None:
@@ -182,27 +165,20 @@ def pass_fail(ok: bool | None) -> str:
     return "PASS" if ok else "FAIL"
 
 
-def print_compare(name: str, data: dict | None, *, failed_key: bool = False) -> None:
+def print_compare(name: str, data: dict | None) -> None:
     if data is None:
         print(f"{name}: MISSING")
         return
-    if failed_key:
-        ok = data.get("failed") == 0
-        print(
-            f"{name}: {pass_fail(ok)} "
-            f"count={data.get('count')} failed={data.get('failed')} "
-            f"max_abs={data.get('max_abs')} mean_abs_avg={data.get('mean_abs_avg')}"
-        )
-        return
-    ok = bool(data.get("allclose"))
+    ok = data.get("status") == "PASS"
     print(
         f"{name}: {pass_fail(ok)} "
-        f"max_abs={data.get('max_abs')} mean_abs={data.get('mean_abs')} "
+        f"count={data.get('count')} failed={data.get('failed')} "
+        f"min_abs={data.get('min_abs')} max_abs={data.get('max_abs')} "
+        f"mean_abs_avg={data.get('mean_abs_avg')} "
         f"shape={data.get('shape')}"
     )
 
 
-prompt_sections = read_prompt_sections(prompt_path)
 input_data = (
     torch.load(input_path, map_location="cpu", weights_only=False)
     if input_path.exists()
@@ -212,73 +188,41 @@ input_ids = input_data.get("input_ids")
 prompt_embeds = input_data.get("prompt_embeds")
 attention_mask = input_data.get("attention_mask")
 
-print("[Input prompt format]")
-print("token baseline input:")
-print("  {")
-print("    'prompt': <effective_text>,")
-print("    'prompt_token_ids': input_ids,")
-print("  }")
-print("prompt-embeds input:")
-print("  {")
-print("    'prompt': <effective_text>,")
-print("    'prompt_embeds': prompt_embeds,")
-print("  }")
-print("batch prompt-embeds input:")
-print(
-    "  same prompt text; prompt_embeds variants are "
-    f"base_prompt_embeds * (1 + batch_idx * variant_scale_step), "
-    f"batch_size={batch_size}, num_rounds={num_rounds}"
-)
-print(f"prompt file: {prompt_path}")
-print(f"original text: {prompt_sections.get('text', '<missing>')!r}")
-print(f"effective prompt: {prompt_sections.get('effective_text', '<missing>')!r}")
+print("[Input]")
+print("input sequence: <random emb><prompt emb><random emb>")
 if input_ids is not None:
     print(f"input_ids shape: {tuple(input_ids.shape)}")
-    print(f"input_ids: {input_ids.tolist()}")
 if attention_mask is not None:
     print(f"attention_mask shape: {tuple(attention_mask.shape)}")
 if prompt_embeds is not None:
     print(f"prompt_embeds shape: {tuple(prompt_embeds.shape)}")
+    hidden_size = int(prompt_embeds.shape[-1])
+    prompt_len = int(prompt_embeds.shape[0])
+    print(f"random_emb prefix shape: ({mem_len}, {hidden_size})")
+    print(f"random_emb suffix shape: ({mem_len}, {hidden_size})")
+    print(f"full_prompt_emb shape: ({mem_len + prompt_len + mem_len}, {hidden_size})")
+    print(
+        "batch variants: "
+        f"batch_size={batch_size}, num_rounds={num_rounds}, "
+        "prompt_emb is scaled per batch index"
+    )
 
 lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
 
 print()
-print("[Single test]")
-generated = last_value(lines, "Generated ids match:")
-generated_ok = None if generated is None else generated == "True"
-print(f"generated_ids_match: {pass_fail(generated_ok)} value={generated}")
+print("[Output]")
 print_compare(
-    "prompt_embeds_vs_token_hidden_states",
-    parse_dict(lines, "Prompt-embeds vs token hidden states:"),
+    "single_vs_single",
+    parse_dict(lines, "single_vs_single_summary:"),
 )
 print_compare(
-    "prompt_embeds_vs_hf_hidden_states",
-    parse_dict(lines, "Prompt-embeds vs HF hidden states:"),
+    "batch_vs_batch",
+    parse_dict(lines, "batch_vs_batch_summary:"),
 )
-single_result = last_value(lines, "SINGLE_DEMO_RESULT:")
-print(f"single_demo_result: {single_result or 'MISSING'}")
+memory_result = last_value(lines, "MEMORY_DEMO_RESULT:")
+print(f"memory_demo_result: {memory_result or 'MISSING'}")
 
-print()
-print("[Batch test]")
-print_compare(
-    "batch_gt_vs_single_gt",
-    parse_dict(lines, "single_vs_batch_summary:"),
-    failed_key=True,
-)
-print_compare(
-    "async_batch_vs_batch_gt",
-    parse_dict(lines, "async_vs_batch_summary:"),
-    failed_key=True,
-)
-print_compare(
-    "async_batch_vs_single_gt",
-    parse_dict(lines, "async_vs_single_summary:"),
-    failed_key=True,
-)
-batch_result = last_value(lines, "BATCH_DEMO_RESULT:")
-print(f"batch_demo_result: {batch_result or 'MISSING'}")
-
-overall_ok = single_result == "PASS" and batch_result == "PASS"
+overall_ok = memory_result == "PASS"
 print()
 print(f"OVERALL_RESULT: {pass_fail(overall_ok)}")
 PY
@@ -296,6 +240,7 @@ main() {
   echo "LAYER_IDS: ${LAYER_IDS}"
   echo "BATCH_SIZE: ${BATCH_SIZE}"
   echo "NUM_ROUNDS: ${NUM_ROUNDS}"
+  echo "MEM_LEN: ${MEM_LEN}"
   echo "GPU_MEMORY_UTILIZATION: ${GPU_MEMORY_UTILIZATION}"
   echo "MAX_MODEL_LEN: ${MAX_MODEL_LEN}"
   echo "HF_HOME: ${HF_HOME}"
@@ -340,24 +285,21 @@ PY
 
   cd "${DEMO_ROOT}"
 
-  run_step "Single sample: generate GT and run vLLM single test" \
-    "${PYTHON}" examples/offline_inference/prompt_embed_single_demo.py \
+  run_step "Generate base prompt embeddings" \
+    "${PYTHON}" examples/offline_inference/save_prompt_embed_hidden_states_ground_truth.py \
       --model "${MODEL}" \
-      --run-root "${SINGLE_ROOT}" \
-      --gpu "${GPU}" \
       --seq-len "${SEQ_LEN}" \
-      --layer-ids "${LAYER_IDS}" \
+      --device cuda \
       --dtype "${DTYPE}" \
-      --max-model-len "${MAX_MODEL_LEN}" \
-      --gpu-memory-utilization "${GPU_MEMORY_UTILIZATION}"
+      --output "${SINGLE_ROOT}/single_gt.pth"
 
-  run_step "Batch sample: generate single/batch GT and run vLLM batch test" \
-    "${PYTHON}" examples/offline_inference/prompt_embed_batch_demo.py \
+  run_step "Memory prompt test: [random emb][prompt emb][random emb]" \
+    "${PYTHON}" examples/offline_inference/prompt_embed_memory_batch_demo.py \
       --model "${MODEL}" \
       --input-pth "${SINGLE_ROOT}/single_gt.input.pth" \
-      --run-root "${BATCH_ROOT}" \
-      --gpu "${GPU}" \
+      --work-dir "${BATCH_ROOT}" \
       --layer-ids "${LAYER_IDS}" \
+      --mem-len "${MEM_LEN}" \
       --batch-size "${BATCH_SIZE}" \
       --num-rounds "${NUM_ROUNDS}" \
       --dtype "${DTYPE}" \
